@@ -1,14 +1,83 @@
 //! elatum kb optim
 
+use std::{fs::read_to_string as read_file_to_string, sync::{Arc, Mutex}};
+
+use clap::Parser;
 use nalgebra::Vector2;
+use rand::{Rng, rng};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+mod macros;
+
+
+
+#[derive(Parser, Debug)]
+#[clap(
+	about,
+	author,
+	version,
+	help_template = "\
+		{before-help}{name} v{version}\n\
+		\n\
+		{about}\n\
+		\n\
+		Author: {author}\n\
+		\n\
+		{usage-heading} {usage}\n\
+		\n\
+		{all-args}{after-help}\
+	",
+)]
+struct CliArgs {
+	dataset_filename: String,
+}
+
 
 
 // const SWIPE_LEN: f64 = 1.;
 
 
+const QUALITY_EXCLUDE_CHARS: &str = "0123456789–—|";
+
+
 fn main() {
-	println!("Hello, world!");
+	let cli_args = CliArgs::parse();
+
+	let dataset = read_file_to_string(cli_args.dataset_filename).unwrap();
+
+	let msgs: Vec<&str> = dataset
+		.split('\n')
+		.map(|msg| msg.trim())
+		.collect();
+
+	let q_me = Keyboard::m_e().measure_quality(&msgs);
+	println!("Quality ME: {q_me:#?}");
+
+	println!("Quality of Random: {:#?}", Keyboard::m_e().shuffled(1.).measure_quality(&msgs));
+
+	// let mut kb_best = Keyboard::m_e();
+	// let mut q_best: Arc<Mutex<KeyboardQuality>> = Arc::new(Mutex::new(q_me));
+	const N_CORES: usize = 10;
+	(0..N_CORES)
+		// .into_iter()
+		.into_par_iter()
+		.map(|i| {
+			let mut kb_best = Keyboard::m_e();
+			let mut q_best: KeyboardQuality = q_me;
+			loop {
+				let p = rng().random_range(0. .. 1.);
+				let kb = kb_best.clone().shuffled(p);
+				let q_new = kb.measure_quality(&msgs);
+				if q_new.is_better_by_travels_than(q_best) {
+					q_best = q_new;
+					kb_best = kb.clone();
+					println!("Quality New: {q_best:#?}");
+				}
+			}
+		})
+		.collect::<Vec<_>>();
 }
+
 
 
 #[derive(Debug, PartialEq, Eq)]
@@ -18,15 +87,19 @@ enum Constraint<T> {
 }
 
 
+
 #[derive(Debug, PartialEq, Eq)]
 enum KeyboardAction {
 	Text { text: char },
 }
 
 
+
 type Position = Vector2<i8>;
 
 
+
+#[derive(Debug, Clone)]
 struct Keyboard {
 	symbols_locations: Vec<(char, (Position, Direction))>,
 }
@@ -139,14 +212,25 @@ impl Keyboard {
 		}
 	}
 
-	fn measure_quality(&self, dataset: Vec<String>) -> KeyboardQuality {
+	fn optimize(&mut self) {
+		todo!()
+	}
+
+	fn optimized(mut self) -> Self {
+		self.optimize();
+		self
+	}
+
+
+	fn measure_quality(&self, dataset: &[&str]) -> KeyboardQuality {
 		let mut keyboard_quality = KeyboardQuality::new();
 		// relative to center button
 		for dataset_element in dataset {
 			let mut finger_position = Position::zeros();
 			for symbol in dataset_element.chars() {
+				if QUALITY_EXCLUDE_CHARS.contains(symbol) { continue }
 				let (_symbol, (target_position, target_direction)): &(char, (Position, Direction)) =
-					&self.symbols_locations.iter().find(|&sl| sl.0 == symbol).unwrap();
+					&self.symbols_locations.iter().find(|&sl| sl.0 == symbol).unwrap_or_else(|| panic!("{symbol}"));
 				// println!(
 				//     "target_position = ({tpx}, {tpy}), target_direction = {target_direction:?}",
 				//     tpx=target_position.x,
@@ -185,10 +269,30 @@ impl Keyboard {
 		}
 		keyboard_quality
 	}
+
+	fn shuffle(&mut self, p: f32) {
+		const EXCLUDE_CHARS: &str = "";
+		let n = self.symbols_locations.len();
+		let mut rng = rng();
+		for i in 0..n {
+			if rng.random_range(0. .. 1.) < p {
+				let j = rng.random_range(0..n);
+				swap!(
+					self.symbols_locations[i].1,
+					self.symbols_locations[j].1
+				);
+			}
+		}
+	}
+
+	fn shuffled(mut self, p: f32) -> Self {
+		self.shuffle(p);
+		self
+	}
 }
 
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct KeyboardQuality {
 	taps: u64,
 	straight_swipes: u64,
@@ -216,10 +320,70 @@ impl KeyboardQuality {
 			diagonal_travels: 0,
 		}
 	}
+
+	fn is_totally_better_than(&self, other: Self) -> bool {
+		self.taps < other.taps &&
+		self.straight_swipes < other.straight_swipes &&
+		self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels
+	}
+
+	fn is_4_better_than(&self, other: Self) -> bool {
+		(//self.taps < other.taps &&
+		self.straight_swipes < other.straight_swipes &&
+		self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels)
+		||
+		(self.taps < other.taps &&
+		// self.straight_swipes < other.straight_swipes &&
+		self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels)
+		||
+		(self.taps < other.taps &&
+		self.straight_swipes < other.straight_swipes &&
+		// self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels)
+		||
+		(self.taps < other.taps &&
+		self.straight_swipes < other.straight_swipes &&
+		self.diagonal_swipes < other.diagonal_swipes &&
+		// self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels)
+		||
+		(self.taps < other.taps &&
+		self.straight_swipes < other.straight_swipes &&
+		self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels //&&
+		/*self.diagonal_travels < other.diagonal_travels*/)
+	}
+
+	fn is_better_exc_taps_than(&self, other: Self) -> bool {
+		// self.taps < other.taps &&
+		self.straight_swipes < other.straight_swipes &&
+		self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels
+	}
+
+	fn is_better_by_travels_than(&self, other: Self) -> bool {
+		// self.taps < other.taps &&
+		// self.straight_swipes < other.straight_swipes &&
+		// self.diagonal_swipes < other.diagonal_swipes &&
+		self.straight_travels < other.straight_travels &&
+		self.diagonal_travels < other.diagonal_travels
+	}
+
+	// fn is_better_than(&self, other: Self) -> bool {
+	// 	?
+	// }
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum Direction {
 	Center,
 	Right,
@@ -267,7 +431,7 @@ mod measure_quality {
 				straight_travels: 0,
 				diagonal_travels: 1,
 			},
-			Keyboard::m_e().measure_quality(vec!["good".to_string()])
+			Keyboard::m_e().measure_quality(&["good"])
 		);
 	}
 
@@ -281,7 +445,7 @@ mod measure_quality {
 				straight_travels: 5,
 				diagonal_travels: 3,
 			},
-			Keyboard::m_e().measure_quality(vec!["elatum".to_string()])
+			Keyboard::m_e().measure_quality(&["elatum"])
 		);
 	}
 
@@ -295,7 +459,7 @@ mod measure_quality {
 				straight_travels: 8,
 				diagonal_travels: 5,
 			},
-			Keyboard::m_e().measure_quality(vec!["the keyboard".to_string()])
+			Keyboard::m_e().measure_quality(&["the keyboard"])
 		);
 	}
 }
