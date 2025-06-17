@@ -1,10 +1,10 @@
 //! elatum kb optim
 
-use std::{fs::read_to_string as read_file_to_string, sync::{Arc, Mutex}};
+use std::fs::read_to_string as read_file_to_string;
 
 use clap::Parser;
 use nalgebra::Vector2;
-use rand::{Rng, rng};
+use rand::{rng, Rng};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 mod macros;
@@ -51,31 +51,70 @@ fn main() {
 		.collect();
 
 	let q_me = Keyboard::m_e().measure_quality(&msgs);
+	println!();
+	println!("ME layout:\n{}", Keyboard::m_e().to_string3());
+	println!();
 	println!("Quality ME: {q_me:#?}");
-
+	println!();
 	println!("Quality of Random: {:#?}", Keyboard::m_e().shuffled(1.).measure_quality(&msgs));
+	println!();
 
-	// let mut kb_best = Keyboard::m_e();
-	// let mut q_best: Arc<Mutex<KeyboardQuality>> = Arc::new(Mutex::new(q_me));
-	const N_CORES: usize = 10;
-	(0..N_CORES)
+	const N_CORES: usize = 12;
+	const N_ITERS: usize = 10_000_000;
+	dbg!(N_CORES);
+	dbg!(N_ITERS);
+	let mut best_kbs_qs: Vec<(Keyboard, KeyboardQuality)> = (0..N_CORES)
 		// .into_iter()
 		.into_par_iter()
-		.map(|i| {
+		.map(|_i| {
 			let mut kb_best = Keyboard::m_e();
 			let mut q_best: KeyboardQuality = q_me;
-			loop {
+			for _ in 0..N_ITERS {
 				let p = rng().random_range(0. .. 1.);
 				let kb = kb_best.clone().shuffled(p);
 				let q_new = kb.measure_quality(&msgs);
-				if q_new.is_better_by_travels_than(q_best) {
+				if q_new.is_better(q_best) {
 					q_best = q_new;
 					kb_best = kb.clone();
 					println!("Quality New: {q_best:#?}");
 				}
 			}
+			(kb_best, q_best)
 		})
-		.collect::<Vec<_>>();
+		.collect();
+
+	fn index_of_worst_kb(qs: &[KeyboardQuality]) -> Option<usize> {
+		println!("{}", "-".repeat(42));
+		if qs.len() == 1 { return None }
+		'i_loop: for i in 0..qs.len() {
+			for j in 0..qs.len() {
+				if i == j { continue }
+				let is_worse = qs[j].is_worse(qs[i]);
+				println!("j={j} is worse than i={i}: {is_worse}");
+				if is_worse {
+					continue 'i_loop
+				}
+			}
+			return Some(i)
+		}
+		None
+	}
+
+	let mut qs = best_kbs_qs.iter().map(|(_kb, q)| *q).collect::<Vec<KeyboardQuality>>();
+	dbg!(qs.len(), &qs);
+	while let Some(index_of_worst_kb) = index_of_worst_kb(&qs) {
+		dbg!(index_of_worst_kb);
+		best_kbs_qs.remove(index_of_worst_kb);
+		qs.remove(index_of_worst_kb);
+	}
+
+	dbg!(qs.len(), &qs);
+
+	for (kb, q) in best_kbs_qs {
+		println!("\n\n\n");
+		println!("{}", kb.to_string3());
+		println!("{q:#?}");
+	}
 }
 
 
@@ -101,113 +140,121 @@ type Position = Vector2<i8>;
 
 #[derive(Debug, Clone)]
 struct Keyboard {
-	symbols_locations: Vec<(char, (Position, Direction))>,
+	symbols_locations: Vec<(Option<char>, (Position, Direction))>,
 }
 impl Keyboard {
 	fn m_e() -> Self {
 		Self {
 			symbols_locations: vec![
 				// center:
-				('o', (Position::new(0, 0), Direction::Center)),
-				('b', (Position::new(0, 0), Direction::Right)),
-				('u', (Position::new(0, 0), Direction::Up)),
-				('c', (Position::new(0, 0), Direction::Left)),
-				('d', (Position::new(0, 0), Direction::Down)),
-				('p', (Position::new(0, 0), Direction::RightUp)),
-				('q', (Position::new(0, 0), Direction::LeftUp)),
-				('g', (Position::new(0, 0), Direction::LeftDown)),
-				('j', (Position::new(0, 0), Direction::RightDown)),
+				(Some('o'), (Position::new(0, 0), Direction::Center)),
+				(Some('b'), (Position::new(0, 0), Direction::Right)),
+				(Some('u'), (Position::new(0, 0), Direction::Up)),
+				(Some('c'), (Position::new(0, 0), Direction::Left)),
+				(Some('d'), (Position::new(0, 0), Direction::Down)),
+				(Some('p'), (Position::new(0, 0), Direction::RightUp)),
+				(Some('q'), (Position::new(0, 0), Direction::LeftUp)),
+				(Some('g'), (Position::new(0, 0), Direction::LeftDown)),
+				(Some('j'), (Position::new(0, 0), Direction::RightDown)),
 
 				// right:
-				('r', (Position::new(1, 0), Direction::Center)),
-				(')', (Position::new(1, 0), Direction::Right)),
-				// ('', (Position::new(1, 0), Direction::Up)),
-				('m', (Position::new(1, 0), Direction::Left)),
-				// ('', (Position::new(1, 0), Direction::Down)),
-				('}', (Position::new(1, 0), Direction::RightUp)),
-				// ('', (Position::new(1, 0), Direction::LeftUp)),
-				('@', (Position::new(1, 0), Direction::LeftDown)),
-				(']', (Position::new(1, 0), Direction::RightDown)),
+				(Some('r'), (Position::new(1, 0), Direction::Center)),
+				(Some(')'), (Position::new(1, 0), Direction::Right)),
+				(None, (Position::new(1, 0), Direction::Up)),
+				(Some('m'), (Position::new(1, 0), Direction::Left)),
+				(None, (Position::new(1, 0), Direction::Down)),
+				(Some('}'), (Position::new(1, 0), Direction::RightUp)),
+				(None, (Position::new(1, 0), Direction::LeftUp)),
+				(Some('@'), (Position::new(1, 0), Direction::LeftDown)),
+				(Some(']'), (Position::new(1, 0), Direction::RightDown)),
 
 				// up:
-				('n', (Position::new(0, 1), Direction::Center)),
-				('!', (Position::new(0, 1), Direction::Right)),
-				('^', (Position::new(0, 1), Direction::Up)),
-				('+', (Position::new(0, 1), Direction::Left)),
-				('l', (Position::new(0, 1), Direction::Down)),
-				// ('', (Position::new(0, 1), Direction::RightUp)),
-				// ('', (Position::new(0, 1), Direction::LeftUp)),
-				('/', (Position::new(0, 1), Direction::LeftDown)),
-				('\\', (Position::new(0, 1), Direction::RightDown)),
+				(Some('n'), (Position::new(0, 1), Direction::Center)),
+				(Some('!'), (Position::new(0, 1), Direction::Right)),
+				(Some('^'), (Position::new(0, 1), Direction::Up)),
+				(Some('+'), (Position::new(0, 1), Direction::Left)),
+				(Some('l'), (Position::new(0, 1), Direction::Down)),
+				(None, (Position::new(0, 1), Direction::RightUp)),
+				(None, (Position::new(0, 1), Direction::LeftUp)),
+				(Some('/'), (Position::new(0, 1), Direction::LeftDown)),
+				(Some('\\'), (Position::new(0, 1), Direction::RightDown)),
 
 				// left:
-				('h', (Position::new(-1, 0), Direction::Center)),
-				('k', (Position::new(-1, 0), Direction::Right)),
-				// ('', (Position::new(-1, 0), Direction::Up)),
-				('(', (Position::new(-1, 0), Direction::Left)),
-				// ('', (Position::new(-1, 0), Direction::Down)),
-				('%', (Position::new(-1, 0), Direction::RightUp)),
-				('{', (Position::new(-1, 0), Direction::LeftUp)),
-				('[', (Position::new(-1, 0), Direction::LeftDown)),
-				('_', (Position::new(-1, 0), Direction::RightDown)),
+				(Some('h'), (Position::new(-1, 0), Direction::Center)),
+				(Some('k'), (Position::new(-1, 0), Direction::Right)),
+				(None, (Position::new(-1, 0), Direction::Up)),
+				(Some('('), (Position::new(-1, 0), Direction::Left)),
+				(None, (Position::new(-1, 0), Direction::Down)),
+				(Some('%'), (Position::new(-1, 0), Direction::RightUp)),
+				(Some('{'), (Position::new(-1, 0), Direction::LeftUp)),
+				(Some('['), (Position::new(-1, 0), Direction::LeftDown)),
+				(Some('_'), (Position::new(-1, 0), Direction::RightDown)),
 
 				// down:
-				('e', (Position::new(0, -1), Direction::Center)),
-				('z', (Position::new(0, -1), Direction::Right)),
-				('w', (Position::new(0, -1), Direction::Up)),
-				// ('', (Position::new(0, -1), Direction::Left)),
-				('.', (Position::new(0, -1), Direction::Down)),
-				('\'', (Position::new(0, -1), Direction::RightUp)),
-				('"', (Position::new(0, -1), Direction::LeftUp)),
-				(',', (Position::new(0, -1), Direction::LeftDown)),
-				(':', (Position::new(0, -1), Direction::RightDown)),
+				(Some('e'), (Position::new(0, -1), Direction::Center)),
+				(Some('z'), (Position::new(0, -1), Direction::Right)),
+				(Some('w'), (Position::new(0, -1), Direction::Up)),
+				(None, (Position::new(0, -1), Direction::Left)),
+				(Some('.'), (Position::new(0, -1), Direction::Down)),
+				(Some('\''), (Position::new(0, -1), Direction::RightUp)),
+				(Some('"'), (Position::new(0, -1), Direction::LeftUp)),
+				(Some(','), (Position::new(0, -1), Direction::LeftDown)),
+				(Some(':'), (Position::new(0, -1), Direction::RightDown)),
 
 				// right up:
-				('i', (Position::new(1, 1), Direction::Center)),
-				// ('', (Position::new(1, 1), Direction::Right)),
-				// ('', (Position::new(1, 1), Direction::Up)),
-				('?', (Position::new(1, 1), Direction::Left)),
-				('=', (Position::new(1, 1), Direction::Down)),
-				// ('', (Position::new(1, 1), Direction::RightUp)),
-				// ('', (Position::new(1, 1), Direction::LeftUp)),
-				('x', (Position::new(1, 1), Direction::LeftDown)),
-				// ('', (Position::new(1, 1), Direction::RightDown)),
+				(Some('i'), (Position::new(1, 1), Direction::Center)),
+				(None, (Position::new(1, 1), Direction::Right)),
+				(None, (Position::new(1, 1), Direction::Up)),
+				(Some('?'), (Position::new(1, 1), Direction::Left)),
+				(Some('='), (Position::new(1, 1), Direction::Down)),
+				(None, (Position::new(1, 1), Direction::RightUp)),
+				(None, (Position::new(1, 1), Direction::LeftUp)),
+				(Some('x'), (Position::new(1, 1), Direction::LeftDown)),
+				(None, (Position::new(1, 1), Direction::RightDown)),
 
 				// left up:
-				('a', (Position::new(-1, 1), Direction::Center)),
-				('-', (Position::new(-1, 1), Direction::Right)),
-				// ('', (Position::new(-1, 1), Direction::Up)),
-				// ('', (Position::new(-1, 1), Direction::Left)),
-				// ('', (Position::new(-1, 1), Direction::Down)),
-				// ('', (Position::new(-1, 1), Direction::RightUp)),
-				// ('', (Position::new(-1, 1), Direction::LeftUp)),
-				('$', (Position::new(-1, 1), Direction::LeftDown)),
-				('v', (Position::new(-1, 1), Direction::RightDown)),
+				(Some('a'), (Position::new(-1, 1), Direction::Center)),
+				(Some('-'), (Position::new(-1, 1), Direction::Right)),
+				(None, (Position::new(-1, 1), Direction::Up)),
+				(None, (Position::new(-1, 1), Direction::Left)),
+				(None, (Position::new(-1, 1), Direction::Down)),
+				(None, (Position::new(-1, 1), Direction::RightUp)),
+				(None, (Position::new(-1, 1), Direction::LeftUp)),
+				(Some('$'), (Position::new(-1, 1), Direction::LeftDown)),
+				(Some('v'), (Position::new(-1, 1), Direction::RightDown)),
 
 				// left down:
-				('t', (Position::new(-1, -1), Direction::Center)),
-				('*', (Position::new(-1, -1), Direction::Right)),
-				// ('', (Position::new(-1, -1), Direction::Up)),
-				('<', (Position::new(-1, -1), Direction::Left)),
-				// ('', (Position::new(-1, -1), Direction::Down)),
-				('y', (Position::new(-1, -1), Direction::RightUp)),
-				('~', (Position::new(-1, -1), Direction::LeftUp)),
-				// ('', (Position::new(-1, -1), Direction::LeftDown)),
-				('\t', (Position::new(-1, -1), Direction::RightDown)),
+				(Some('t'), (Position::new(-1, -1), Direction::Center)),
+				(Some('*'), (Position::new(-1, -1), Direction::Right)),
+				(None, (Position::new(-1, -1), Direction::Up)),
+				(Some('<'), (Position::new(-1, -1), Direction::Left)),
+				(None, (Position::new(-1, -1), Direction::Down)),
+				(Some('y'), (Position::new(-1, -1), Direction::RightUp)),
+				(Some('~'), (Position::new(-1, -1), Direction::LeftUp)),
+				(None, (Position::new(-1, -1), Direction::LeftDown)),
+				(None, (Position::new(-1, -1), Direction::RightDown)), // '\t'
 
 				// right down:
-				('s', (Position::new(1, -1), Direction::Center)),
-				('>', (Position::new(1, -1), Direction::Right)),
-				('&', (Position::new(1, -1), Direction::Up)),
-				('#', (Position::new(1, -1), Direction::Left)),
-				// ('', (Position::new(1, -1), Direction::Down)),
-				('°', (Position::new(1, -1), Direction::RightUp)),
-				('f', (Position::new(1, -1), Direction::LeftUp)),
-				(';', (Position::new(1, -1), Direction::LeftDown)),
-				// ('', (Position::new(1, -1), Direction::RightDown)),
+				(Some('s'), (Position::new(1, -1), Direction::Center)),
+				(Some('>'), (Position::new(1, -1), Direction::Right)),
+				(Some('&'), (Position::new(1, -1), Direction::Up)),
+				(Some('#'), (Position::new(1, -1), Direction::Left)),
+				(None, (Position::new(1, -1), Direction::Down)),
+				(Some('°'), (Position::new(1, -1), Direction::RightUp)),
+				(Some('f'), (Position::new(1, -1), Direction::LeftUp)),
+				(Some(';'), (Position::new(1, -1), Direction::LeftDown)),
+				(None, (Position::new(1, -1), Direction::RightDown)),
 
 				// space:
-				(' ', (Position::new(0, -2), Direction::Center)),
+				(Some(' '), (Position::new(0, -2), Direction::Center)),
+				(None, (Position::new(1, -1), Direction::Right)),
+				(None, (Position::new(1, -1), Direction::Up)),
+				(None, (Position::new(1, -1), Direction::Left)),
+				(None, (Position::new(1, -1), Direction::Down)),
+				(None, (Position::new(1, -1), Direction::RightUp)),
+				(None, (Position::new(1, -1), Direction::LeftUp)),
+				(None, (Position::new(1, -1), Direction::LeftDown)),
+				(None, (Position::new(1, -1), Direction::RightDown)),
 			],
 		}
 	}
@@ -229,8 +276,8 @@ impl Keyboard {
 			let mut finger_position = Position::zeros();
 			for symbol in dataset_element.chars() {
 				if QUALITY_EXCLUDE_CHARS.contains(symbol) { continue }
-				let (_symbol, (target_position, target_direction)): &(char, (Position, Direction)) =
-					&self.symbols_locations.iter().find(|&sl| sl.0 == symbol).unwrap_or_else(|| panic!("{symbol}"));
+				let (_symbol, (target_position, target_direction)): &(Option<char>, (Position, Direction)) =
+					&self.symbols_locations.iter().find(|&sl| sl.0 == Some(symbol)).unwrap_or_else(|| panic!("{symbol}"));
 				// println!(
 				//     "target_position = ({tpx}, {tpy}), target_direction = {target_direction:?}",
 				//     tpx=target_position.x,
@@ -270,6 +317,11 @@ impl Keyboard {
 		keyboard_quality
 	}
 
+	fn shuffled(mut self, p: f32) -> Self {
+		self.shuffle(p);
+		self
+	}
+
 	fn shuffle(&mut self, p: f32) {
 		const EXCLUDE_CHARS: &str = "";
 		let n = self.symbols_locations.len();
@@ -277,6 +329,8 @@ impl Keyboard {
 		for i in 0..n {
 			if rng.random_range(0. .. 1.) < p {
 				let j = rng.random_range(0..n);
+				if self.symbols_locations[i].0.map_or(false, |c| EXCLUDE_CHARS.contains(c)) ||
+					self.symbols_locations[j].0.map_or(false, |c| EXCLUDE_CHARS.contains(c)) { continue }
 				swap!(
 					self.symbols_locations[i].1,
 					self.symbols_locations[j].1
@@ -285,9 +339,69 @@ impl Keyboard {
 		}
 	}
 
-	fn shuffled(mut self, p: f32) -> Self {
-		self.shuffle(p);
-		self
+	fn to_string(&self) -> String {
+		let x_min = self.symbols_locations.iter().map(|(_c, (p, _d))| p.x).min().unwrap();
+		let x_max = self.symbols_locations.iter().map(|(_c, (p, _d))| p.x).max().unwrap();
+		let y_min = self.symbols_locations.iter().map(|(_c, (p, _d))| p.y).min().unwrap();
+		let y_max = self.symbols_locations.iter().map(|(_c, (p, _d))| p.y).max().unwrap();
+		let x_range = x_max - x_min + 1;
+		let y_range = y_max - y_min + 1;
+		// assert_eq!(3, x_range);
+		// assert_eq!(4, y_range);
+
+		let string_size_x = (x_range * 4 - 1) as usize;
+		let string_size_y = (y_range * 4 - 1) as usize;
+		// assert_eq!(11, string_size_x);
+		// assert_eq!(15, string_size_y);
+
+		let mut s: Vec<Vec<char>> = vec![vec![' '; string_size_x]; string_size_y];
+		for (c, (p, d)) in self.symbols_locations.iter() {
+			let Some(c) = c else { continue };
+			let x = ( (p.x - x_min)*4 + d.to_x() + 1 ) as usize;
+			let y = ( (p.y - y_min)*4 + d.to_y() + 1 ) as usize;
+			let c = if *c != ' ' { *c } else { '␣' };
+			s[string_size_y - y - 1][x] = c;
+		}
+
+		s.iter()
+			.map(|l|
+				l.iter()
+					.map(|c| c.to_string())
+					.collect::<Vec<String>>()
+					.concat()
+			)
+			.collect::<Vec<String>>()
+			.join("\n")
+	}
+
+	fn to_string2(&self) -> String {
+		self.to_string()
+			.lines()
+			.map(|l| {
+				let mut l = l.to_string();
+				for i in (0..l.chars().count()).rev() {
+					if i % 4 == 3 {
+						l = [&l.chars().take(i).collect::<String>(), " ", &l.chars().skip(i).collect::<String>()].concat();
+					}
+				}
+				l
+			})
+			.collect::<Vec<String>>()
+			.join("\n")
+	}
+
+	fn to_string3(&self) -> String {
+		self.to_string()
+			.lines()
+			.map(|l| {
+				let mut l = l.to_string();
+				for i in (1..l.chars().count()).rev() {
+					l = [&l.chars().take(i).collect::<String>(), " ", &l.chars().skip(i).collect::<String>()].concat();
+				}
+				l
+			})
+			.collect::<Vec<String>>()
+			.join("\n")
 	}
 }
 
@@ -319,6 +433,14 @@ impl KeyboardQuality {
 			straight_travels: 0,
 			diagonal_travels: 0,
 		}
+	}
+
+	fn is_better(&self, other: Self) -> bool {
+		self.is_better_by_travels_than(other)
+	}
+
+	fn is_worse(&self, other: Self) -> bool {
+		!self.is_better(other)
 	}
 
 	fn is_totally_better_than(&self, other: Self) -> bool {
@@ -395,6 +517,24 @@ enum Direction {
 	LeftDown,
 	RightDown,
 }
+impl Direction {
+	fn to_x(&self) -> i8 {
+		use Direction::*;
+		match self {
+			Center | Up | Down => 0,
+			Left | LeftUp | LeftDown => -1,
+			Right | RightUp | RightDown => 1,
+		}
+	}
+	fn to_y(&self) -> i8 {
+		use Direction::*;
+		match self {
+			Center | Right | Left => 0,
+			Down | LeftDown | RightDown => -1,
+			Up | LeftUp | RightUp => 1,
+		}
+	}
+}
 
 
 /// Returns number of `straight_travels` and `diagonal_travels`
@@ -461,6 +601,112 @@ mod measure_quality {
 			},
 			Keyboard::m_e().measure_quality(&["the keyboard"])
 		);
+	}
+}
+
+
+
+#[cfg(test)]
+mod to_string {
+	use super::*;
+	#[test]
+	fn m_e() {
+		let expected = [
+			r#"     ^     "#,
+			r#" a- +n! ?i "#,
+			r#"$ v /l\ x= "#,
+			r#"           "#,
+			r#"{ % qup   }"#,
+			r#"(hk cob mr)"#,
+			r#"[ _ gdj @ ]"#,
+			r#"           "#,
+			r#"~ y "w' f&°"#,
+			r#"<t*  ez #s>"#,
+			r#"    ,.: ;  "#,
+			r#"           "#,
+			r#"           "#,
+			r#"     ␣     "#,
+			r#"           "#,
+		].join("\n");
+		let actual = Keyboard::m_e().to_string();
+		println!("expected:\n{expected}");
+		println!();
+		println!("actual:\n{actual}");
+		for (i, (ce, ca)) in expected.chars().zip(actual.chars()).enumerate() {
+			assert_eq!(ce, ca, "error at index {i}");
+		}
+		assert_eq!(expected, actual)
+	}
+}
+
+
+
+#[cfg(test)]
+mod to_string2 {
+	use super::*;
+	#[test]
+	fn m_e() {
+		let expected = [
+			r#"      ^      "#,
+			r#" a-  +n!  ?i "#,
+			r#"$ v  /l\  x= "#,
+			r#"             "#,
+			r#"{ %  qup    }"#,
+			r#"(hk  cob  mr)"#,
+			r#"[ _  gdj  @ ]"#,
+			r#"             "#,
+			r#"~ y  "w'  f&°"#,
+			r#"<t*   ez  #s>"#,
+			r#"     ,.:  ;  "#,
+			r#"             "#,
+			r#"             "#,
+			r#"      ␣      "#,
+			r#"             "#,
+		].join("\n");
+		let actual = Keyboard::m_e().to_string2();
+		println!("expected:\n{expected}");
+		println!();
+		println!("actual:\n{actual}");
+		for (i, (ce, ca)) in expected.chars().zip(actual.chars()).enumerate() {
+			assert_eq!(ce, ca, "error at index {i}");
+		}
+		assert_eq!(expected, actual)
+	}
+}
+
+
+
+#[cfg(test)]
+mod to_string3 {
+	use super::*;
+	#[test]
+	fn m_e() {
+		let expected = [
+			r#"          ^          "#,
+			r#"  a -   + n !   ? i  "#,
+			r#"$   v   / l \   x =  "#,
+			r#"                     "#,
+			r#"{   %   q u p       }"#,
+			r#"( h k   c o b   m r )"#,
+			r#"[   _   g d j   @   ]"#,
+			r#"                     "#,
+			r#"~   y   " w '   f & °"#,
+			r#"< t *     e z   # s >"#,
+			r#"        , . :   ;    "#,
+			r#"                     "#,
+			r#"                     "#,
+			r#"          ␣          "#,
+			r#"                     "#,
+		].join("\n");
+		let actual = Keyboard::m_e().to_string3();
+		println!("expected:\n{expected}");
+		println!();
+		println!("actual:\n{actual}");
+		for (i, (ce, ca)) in expected.chars().zip(actual.chars()).enumerate() {
+			println!("i: {i} , ce: `{ce}` , ca: `{ca}`");
+			assert_eq!(ce, ca, "error at index {i}");
+		}
+		assert_eq!(expected, actual)
 	}
 }
 
